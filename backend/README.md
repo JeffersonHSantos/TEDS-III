@@ -1,174 +1,206 @@
-# API de Gestão de Colaboradores e Folha de Pagamento (Node.js + Express)
+# Backend — API MegaPonto
 
-Implementação de uma API de RH/folha de pagamento com Node.js, Express, SQLite (`better-sqlite3`) e autenticação JWT: cadastro de colaboradores, marcação de ponto, regras financeiras (descontos/adicionais), geração de folha de pagamento, DSR sobre horas extras, cálculo de férias e bônus. Base arquitetural (camadas, JWT, tratamento de erros) explicada passo a passo em [Aula 05](https://pleonr.github.io/apisMicrosservicos/exemplo-node-express).
+API REST de gestão de colaboradores, ponto e folha de pagamento. O backend foi desenvolvido com Node.js, Express, SQLite e JWT.
 
-## Pré-requisitos
+## Requisitos
 
-- Node.js 18 ou mais recente
+- Node.js 18 ou superior
+- npm
 
-## Instalação e execução
+## Instalação
+
+Na raiz do repositório:
 
 ```bash
-cd exemplos/api-node
+cd backend
 npm install
-npm run seed   # popula o banco com dados de exemplo (recomendado)
+```
+
+## Executando a API
+
+### Banco vazio
+
+Para iniciar a API sem dados de demonstração:
+
+```bash
 npm start
 ```
 
-O servidor sobe em `http://localhost:3000`. Na primeira execução, um arquivo `usuarios.db` é criado automaticamente na raiz desta pasta (as tabelas são criadas sozinhas, se ainda não existirem).
+O servidor ficará disponível em `http://localhost:3000`. O arquivo `usuarios.db` será criado automaticamente quando necessário.
 
-Para desenvolvimento com reinício automático a cada alteração:
+O primeiro cadastro em um banco vazio pode ser feito sem token e cria o administrador inicial:
+
+```http
+POST /auth/registrar
+```
+
+### Banco com dados de demonstração
+
+Para recriar o banco local com dados de demonstração:
+
+```bash
+npm run seed
+npm start
+```
+
+> Atenção: o comando `npm run seed` apaga os dados das tabelas e recria a base de demonstração.
+
+Credenciais criadas pelo seed:
+
+| Perfil | E-mail | Senha |
+| --- | --- | --- |
+| Administrador | `admin@empresa.com` | `Admin@123` |
+| Colaborador | `ana.silva@empresa.com` | `Emp@123` |
+| Colaborador | `bruno.lima@empresa.com` | `Emp@123` |
+| Outros colaboradores | `carlos.souza@empresa.com`, `diana.alves@empresa.com`, `eduardo.santos@empresa.com`, `fernanda.melo@empresa.com` | `Emp@123` |
+
+O seed cria sete usuários, quatro registros de ponto para Ana Silva, duas regras financeiras ativas e uma folha de pagamento de demonstração para o período de `2026-08-01` a `2026-08-10`.
+
+### Desenvolvimento
+
+Para reiniciar o servidor automaticamente ao alterar arquivos:
 
 ```bash
 npm run dev
 ```
 
-### Populando o banco com dados de exemplo
+## Variáveis de ambiente
+
+| Variável | Padrão | Finalidade |
+| --- | --- | --- |
+| `PORT` | `3000` | Porta HTTP da API |
+| `JWT_SECRET` | `segredo-de-desenvolvimento` | Segredo usado para assinar os tokens JWT |
+| `DB_PATH` | `backend/usuarios.db` | Caminho do arquivo SQLite |
+
+Exemplo:
 
 ```bash
-npm run seed
+JWT_SECRET=troque-este-segredo PORT=4000 npm start
 ```
 
-Isso apaga o conteúdo das tabelas e recria 7 colaboradores (1 `ADMIN` + 6 `EMPLOYEE`), registros de ponto para Ana Silva (id 3), 2 regras financeiras ativas e 1 folha de pagamento já gerada. Credenciais de seed:
-
-| E-mail | Senha | Papel |
-| --- | --- | --- |
-| `admin@empresa.com` | `Admin@123` | `ADMIN` |
-| `ana.silva@empresa.com` (id 3) | `Emp@123` | `EMPLOYEE` |
-| `bruno.lima@empresa.com` (id 4) | `Emp@123` | `EMPLOYEE` |
-| demais colaboradores (Carlos, Diana, Eduardo, Fernanda) | `Emp@123` | `EMPLOYEE` |
-
-Se o banco estiver vazio (sem `npm run seed`), o primeiro `POST /auth/registrar` não exige token e cria o `ADMIN` inicial (regra de bootstrap).
-
-## Variáveis de ambiente (opcionais)
-
-| Variável | Padrão | Descrição |
-| --- | --- | --- |
-| `PORT` | `3000` | Porta HTTP do servidor |
-| `JWT_SECRET` | `segredo-de-desenvolvimento` | Segredo usado para assinar/validar tokens JWT |
-| `DB_PATH` | `./usuarios.db` | Caminho do arquivo SQLite |
-
-```bash
-JWT_SECRET=algo-mais-seguro PORT=4000 npm start
-```
+Em produção, defina um `JWT_SECRET` forte e não use as credenciais do seed.
 
 ## Endpoints
 
-| Método | Rota | Autenticação | Descrição |
-| --- | --- | --- | --- |
-| `POST` | `/auth/registrar` | Bootstrap: sem token se o banco estiver vazio; `ADMIN` depois disso | Cadastra um colaborador |
-| `POST` | `/auth/login` | Não | Retorna um token JWT |
-| `GET` | `/usuarios` | `ADMIN` | Lista todos os colaboradores |
-| `GET` | `/usuarios/:id` | `ADMIN` ou o próprio | Busca um colaborador |
-| `PUT` | `/usuarios/:id` | `ADMIN` | Substitui o cadastro completo |
-| `PATCH` | `/usuarios/:id` | `ADMIN` ou o próprio (campos sensíveis só por `ADMIN`) | Atualiza campos do cadastro |
-| `DELETE` | `/usuarios/:id` | `ADMIN` | Remove um colaborador |
-| `GET` / `PATCH` | `/usuarios/:id/remuneracao` | `GET`: `ADMIN` ou o próprio · `PATCH`: `ADMIN` | Consulta/atualiza valor-hora e carga horária |
-| `POST` | `/ponto/marcar` | Qualquer autenticado | Marca entrada/saída/almoço do dia (sequencial) |
-| `GET` | `/ponto/hoje` | Qualquer autenticado | Registro de ponto do dia |
-| `GET` | `/ponto/historico` | Qualquer autenticado | Histórico do próprio período (`dataInicio`/`dataFim`) |
-| `GET` | `/ponto/resumo-horas` | Qualquer autenticado | Horas normais/extras do próprio período |
-| `GET` | `/usuarios/:id/ponto/historico` \| `/resumo-horas` | `ADMIN` | Mesma consulta acima, para qualquer colaborador |
-| `POST` / `GET` | `/regras-financeiras` | `POST`: `ADMIN` · `GET`: qualquer autenticado (`EMPLOYEE` só vê ativas) | Cadastra/lista regras de desconto e adicional |
-| `PATCH` / `DELETE` | `/regras-financeiras/:id` | `ADMIN` | Atualiza/remove uma regra (bloqueado se já usada em folha) |
-| `GET` | `/usuarios/:id/folha/pre-calculo` | `ADMIN` | Simula o cálculo de folha para um período |
-| `POST` | `/usuarios/:id/folha/gerar` | `ADMIN` | Persiste a folha do período (bloqueia sobreposição) |
-| `GET` | `/usuarios/:id/folhas` \| `/folhas/:folhaId` | `ADMIN` ou o próprio | Lista/detalha folhas geradas |
-| `GET` | `/usuarios/:id/dsr` | `ADMIN` ou o próprio | DSR sobre horas extras do período |
-| `POST` | `/usuarios/:id/ferias/calcular` | `ADMIN` | Calcula férias + 1/3 constitucional |
-| `POST` / `GET` | `/usuarios/:id/bonus` | `POST`: `ADMIN` · `GET`: `ADMIN` ou o próprio | Cadastra/lista bônus (fixo ou percentual) |
+Todas as rotas protegidas usam:
 
-## Testando com `curl`
+```http
+Authorization: Bearer <token>
+```
+
+### Autenticação e usuários
+
+| Método | Rota | Acesso | Descrição |
+| --- | --- | --- | --- |
+| `POST` | `/auth/registrar` | Bootstrap sem token; depois `ADMIN` | Cadastra um colaborador |
+| `POST` | `/auth/login` | Público | Retorna um token JWT |
+| `GET` | `/usuarios` | `ADMIN` | Lista colaboradores |
+| `GET` | `/usuarios/:id` | `ADMIN` ou próprio usuário | Consulta um colaborador |
+| `PUT` | `/usuarios/:id` | `ADMIN` | Substitui o cadastro |
+| `PATCH` | `/usuarios/:id` | `ADMIN` ou próprio usuário | Atualiza campos permitidos |
+| `DELETE` | `/usuarios/:id` | `ADMIN` | Remove um colaborador |
+
+### Remuneração e ponto
+
+| Método | Rota | Acesso | Descrição |
+| --- | --- | --- | --- |
+| `GET` | `/usuarios/:id/remuneracao` | `ADMIN` ou próprio usuário | Consulta remuneração |
+| `PATCH` | `/usuarios/:id/remuneracao` | `ADMIN` | Atualiza remuneração |
+| `POST` | `/ponto/marcar` | Autenticado | Marca entrada, almoço, retorno ou saída |
+| `GET` | `/ponto/hoje` | Autenticado | Consulta o ponto do dia |
+| `GET` | `/ponto/historico` | Autenticado | Consulta o próprio histórico |
+| `GET` | `/ponto/resumo-horas` | Autenticado | Calcula horas normais e extras |
+| `GET` | `/usuarios/:id/ponto/historico` | `ADMIN` | Consulta histórico de qualquer colaborador |
+| `GET` | `/usuarios/:id/ponto/resumo-horas` | `ADMIN` | Consulta resumo de qualquer colaborador |
+
+### Regras financeiras e folha
+
+| Método | Rota | Acesso | Descrição |
+| --- | --- | --- | --- |
+| `POST` | `/regras-financeiras` | `ADMIN` | Cria desconto ou adicional |
+| `GET` | `/regras-financeiras` | Autenticado | Lista regras; colaboradores veem apenas ativas |
+| `PATCH` | `/regras-financeiras/:id` | `ADMIN` | Atualiza uma regra |
+| `DELETE` | `/regras-financeiras/:id` | `ADMIN` | Remove uma regra não utilizada |
+| `GET` | `/usuarios/:id/folha/pre-calculo` | `ADMIN` | Simula uma folha |
+| `POST` | `/usuarios/:id/folha/gerar` | `ADMIN` | Persiste uma folha |
+| `GET` | `/usuarios/:id/folhas` | `ADMIN` ou próprio usuário | Lista folhas |
+| `GET` | `/usuarios/:id/folhas/:folhaId` | `ADMIN` ou próprio usuário | Detalha uma folha |
+| `GET` | `/usuarios/:id/dsr` | `ADMIN` ou próprio usuário | Calcula DSR sobre horas extras |
+| `POST` | `/usuarios/:id/ferias/calcular` | `ADMIN` | Calcula férias e adicional de um terço |
+| `POST` | `/usuarios/:id/bonus` | `ADMIN` | Cadastra bônus fixo ou percentual |
+| `GET` | `/usuarios/:id/bonus` | `ADMIN` ou próprio usuário | Lista bônus |
+
+## Exemplos com curl
+
+Login:
 
 ```bash
-# Login (copie o token da resposta)
 curl -X POST http://localhost:3000/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email": "admin@empresa.com", "senha": "Admin@123"}'
-
-# Listar colaboradores (rota protegida, só ADMIN)
-curl http://localhost:3000/usuarios \
-  -H "Authorization: Bearer SEU_TOKEN_AQUI"
-
-# Marcar entrada
-curl -X POST http://localhost:3000/ponto/marcar \
-  -H "Authorization: Bearer SEU_TOKEN_AQUI" -H "Content-Type: application/json" \
-  -d '{"tipo": "ENTRADA"}'
-
-# Pré-cálculo de folha de um colaborador
-curl "http://localhost:3000/usuarios/3/folha/pre-calculo?dataInicio=2026-08-01&dataFim=2026-08-10" \
-  -H "Authorization: Bearer SEU_TOKEN_AQUI"
+  -d '{"email":"admin@empresa.com","senha":"Admin@123"}'
 ```
 
-Cada endpoint tem exemplos completos de `curl` (incluindo os casos de erro esperados) nos tutoriais de implementação da atividade correspondente.
-
-## Estrutura do projeto
-
-```
-api-node/
-├── server.js                            # ponto de entrada, sobe o servidor
-├── scripts/seed.js                      # popula o banco com dados de exemplo
-└── src/
-    ├── app.js                           # monta express + rotas + middlewares
-    ├── db.js                            # conexão SQLite + schema (todas as tabelas)
-    ├── models/                          # queries SQL (usuarioModel, registroPontoModel,
-    │                                    #   regraFinanceiraModel, folhaPagamentoModel, bonusModel)
-    ├── services/                        # regras puras (sem acesso a banco): authService,
-    │                                    #   calculoHorasService, calculoFolhaService,
-    │                                    #   calculoDsrService, calculoFeriasService
-    ├── controllers/                     # authController, usuarioController, pontoController,
-    │                                    #   regraFinanceiraController, folhaController,
-    │                                    #   feriasController, bonusController
-    ├── middlewares/
-    │   ├── auth.js                      # valida o JWT (auth) / popula se houver (authOpcional)
-    │   ├── permitir.js                  # restringe uma rota a um conjunto de roles
-    │   ├── errorHandler.js              # formata qualquer erro como JSON
-    │   └── asyncHandler.js              # encaminha erros (sync ou async) ao errorHandler
-    ├── validation/regras.js             # helpers de validação (obrigatorio, validar)
-    ├── utils/periodo.js                 # validação de dataInicio/dataFim
-    ├── errors/apiError.js               # erro com status HTTP embutido
-    └── routes/
-        ├── authRoutes.js
-        ├── usuarioRoutes.js             # inclui remuneração, ponto/folha/férias/bônus por :id
-        ├── pontoRoutes.js
-        └── regraFinanceiraRoutes.js
-```
-
-Este projeto usa **ES Modules** (`import`/`export`), habilitado via `"type": "module"` no `package.json`.
-
-Para apagar o banco e recomeçar do zero:
+Listagem de usuários:
 
 ```bash
-rm usuarios.db
-npm run seed
+curl http://localhost:3000/usuarios \
+  -H "Authorization: Bearer <token>"
 ```
 
-## Testes automatizados
+Marcação de ponto:
+
+```bash
+curl -X POST http://localhost:3000/ponto/marcar \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"tipo":"ENTRADA"}'
+```
+
+Pré-cálculo de folha:
+
+```bash
+curl "http://localhost:3000/usuarios/3/folha/pre-calculo?dataInicio=2026-08-01&dataFim=2026-08-10" \
+  -H "Authorization: Bearer <token>"
+```
+
+## Testes
+
+Os testes usam Vitest, Supertest e SQLite em memória. Portanto, a suíte não altera o arquivo `usuarios.db` local.
 
 ```bash
 npm test
 ```
 
-Roda a suíte de testes de integração (Vitest + Supertest) contra a API real, com SQLite em memória (`DB_PATH=':memory:'`, configurado em `vitest.config.js` — nunca toca no `usuarios.db` do disco). Há um arquivo por atividade em `tests/integration/`, cobrindo o checklist de cada tutorial:
+A suíte possui 17 arquivos de integração e cobre autenticação, autorização, usuários, remuneração, ponto, regras financeiras, folha, DSR, férias e bônus.
 
+## Estrutura
+
+```text
+backend/
+├── server.js
+├── scripts/seed.js
+├── usuarios.db
+├── src/
+│   ├── app.js
+│   ├── db.js
+│   ├── controllers/
+│   ├── errors/
+│   ├── middlewares/
+│   ├── models/
+│   ├── routes/
+│   ├── services/
+│   ├── utils/
+│   └── validation/
+└── tests/integration/
 ```
-tests/integration/
-├── helpers.js  # fixtures: criarUsuario, tokenPara, limparBanco...
-├── 01-cadastro-colaboradores.test.js
-├── 02-listagem-consulta-usuarios.test.js
-├── 03-atualizacao-remocao-usuarios.test.js
-├── 04-parametros-remuneracao.test.js
-├── 05-cadastro-listagem-regras-financeiras.test.js
-├── 06-atualizacao-remocao-regras-financeiras.test.js
-├── 07-marcacao-de-ponto.test.js
-├── 08-consulta-ponto-hoje.test.js
-├── 09-historico-ponto-colaborador.test.js
-├── 10-historico-ponto-admin.test.js
-├── 11-calculo-horas-trabalhadas.test.js
-├── 12-pre-calculo-salario.test.js
-├── 13-geracao-folha-pagamento.test.js
-├── 14-consulta-folhas-pagamento.test.js
-├── 15-calculo-dsr.test.js
-├── 16-calculo-ferias.test.js
-└── 17-cadastro-calculo-bonus.test.js
+
+O código segue uma separação entre rotas, controllers, models e services. O banco é criado automaticamente por `src/db.js` e possui tabelas para usuários, registros de ponto, regras financeiras, folhas, itens de folha e bônus.
+
+## Recomeçar a base local
+
+Para apagar a base local e criar novamente os dados de demonstração:
+
+```bash
+rm usuarios.db
+npm run seed
 ```
